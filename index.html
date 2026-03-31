@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Archive of Moments | Interactive Timeline</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        :root { --bg-dark: #0a0c10; --accent: #3b82f6; --text-dim: #888; }
+        body, html { margin: 0; padding: 0; background: var(--bg-dark); color: #eee; font-family: "Inter", "Segoe UI", sans-serif; overflow: hidden; }
+        
+        /* 2D Entry Interface */
+        #app-2d { height: 100vh; overflow-y: auto; padding: 40px 20px; box-sizing: border-box; transition: opacity 0.8s; position: relative; }
+        
+        #bg-canvas-2d {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            z-index: 1; pointer-events: none; opacity: 0.15; 
+        }
+        
+        .container { max-width: 600px; margin: 0 auto; z-index: 2; position: relative; }
+        
+        header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 30px; }
+        h1 { font-weight: 200; letter-spacing: 4px; font-size: 1.2rem; color: var(--text-dim); margin: 0; }
+        
+        .input-section { background: #111418; padding: 25px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 40px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; font-size: 0.75rem; color: var(--text-dim); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+        input, textarea, select { background: #161a1f; border: 1px solid #222; color: #fff; padding: 12px; border-radius: 6px; width: 100%; box-sizing: border-box; outline: none; transition: 0.3s; }
+        input:focus { border-color: var(--accent); }
+        
+        .weather-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+        .weather-btn { cursor: pointer; padding: 10px 5px; border: 1px solid #222; border-radius: 6px; text-align: center; transition: 0.3s; font-size: 1.2rem; }
+        .weather-btn:hover { background: rgba(255,255,255,0.05); }
+        .weather-btn.active { border-color: var(--accent); background: rgba(59,130,246,0.15); transform: scale(1.05); }
+
+        .slider-wrap { display: flex; align-items: center; gap: 15px; }
+        input[type="range"] { accent-color: var(--accent); }
+        #moodVal { color: var(--accent); font-weight: bold; min-width: 20px; }
+
+        .btn-main { background: none; border: 1px solid var(--accent); color: var(--accent); padding: 12px 30px; cursor: pointer; border-radius: 6px; transition: all 0.4s; font-size: 0.9rem; }
+        .btn-main:hover { background: var(--accent); color: #fff; box-shadow: 0 0 15px rgba(59,130,246,0.4); }
+
+        /* 3D Interface */
+        #gallery-3d { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9999; }
+        #info-tip {
+            position: fixed; bottom: 12%; left: 50%; transform: translateX(-50%);
+            background: rgba(10, 12, 16, 0.9); backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.1); padding: 25px 35px; border-radius: 24px;
+            width: 80%; max-width: 450px; text-align: center; opacity: 0; pointer-events: none; z-index: 10010;
+            transition: 0.4s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+        }
+        .log-item { margin-bottom: 25px; padding: 15px; background: rgba(255,255,255,0.02); border-radius: 8px; border-left: 3px solid transparent; }
+        .ui-overlay { position: absolute; bottom: 40px; width: 100%; text-align: center; z-index: 10002; pointer-events: auto; }
+        .slogan { font-weight: 200; letter-spacing: 4px; opacity: 0.4; font-size: 0.65rem; margin-bottom: 15px; }
+    </style>
+</head>
+<body>
+
+    <div id="app-2d">
+        <canvas id="bg-canvas-2d"></canvas>
+        <div class="container">
+            <header>
+                <h1>ARCHIVE.</h1>
+                <button class="btn-main" onclick="enter3D()">Enter Timeline Gallery</button>
+            </header>
+            
+            <section class="input-section">
+                <div class="form-group"><label>Date</label><input type="date" id="dateInput"></div>
+                <div class="form-group"><label>Location</label><input type="text" id="placeInput" placeholder="Where did this happen?"></div>
+                <div class="form-group">
+                    <label>Weather</label>
+                    <div class="weather-grid" id="weatherPicker">
+                        <div class="weather-btn active" data-val="☀️">☀️</div>
+                        <div class="weather-btn" data-val="☔">☔</div>
+                        <div class="weather-btn" data-val="⛅">⛅</div>
+                        <div class="weather-btn" data-val="❄️">❄️</div>
+                        <div class="weather-btn" data-val="🌬️">🌬️</div>
+                        <div class="weather-btn" data-val="🌈">🌈</div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Mood Index (1-10)</label>
+                    <div class="slider-wrap">
+                        <input type="range" id="moodSlider" min="1" max="10" value="5">
+                        <span id="moodVal">5</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Log Category</label>
+                    <select id="themeInput">
+                        <option value="Nature">Nature (Green)</option>
+                        <option value="Culture">Culture (Purple)</option>
+                        <option value="Food">Food (Yellow)</option>
+                        <option value="Event">Event (Pink)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Memory Fragment</label>
+                    <textarea id="contentInput" placeholder="Capture your thoughts..." rows="4"></textarea>
+                </div>
+                <input type="file" id="imageInput" accept="image/*" style="margin-bottom: 20px;">
+                <button class="btn-main" id="submitBtn" onclick="saveToCloud()" style="width:100%;">Archive to Vault</button>
+            </section>
+            <div id="logsDisplay"></div>
+        </div>
+    </div>
+
+    <div id="gallery-3d">
+        <div id="info-tip">
+            <div id="tip-header" style="font-size: 0.75rem; color: var(--accent); margin-bottom: 10px; letter-spacing: 2px;"></div>
+            <div id="tip-body" style="font-size: 1.1rem; font-weight: 300; line-height: 1.6; color: #fff;"></div>
+        </div>
+        <div class="ui-overlay">
+            <div class="slogan">Scroll to navigate | Click to interact</div>
+            <button class="btn-main" style="border-radius: 50px; background: rgba(0,0,0,0.7);" onclick="exit3D()">Exit Gallery</button>
+        </div>
+    </div>
+
+    <script>
+        const SUPABASE_URL = 'https://kpgfcsecexllxyobiygk.supabase.co'; 
+        const SUPABASE_KEY = 'sb_publishable_lvErXhuRQ3qmW2r-k4WjWw_0SuvrW2b'; 
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        let scene, camera, renderer, spiralGroup, is3D = false;
+        let starField, floatingParticles; 
+        let raycaster = new THREE.Raycaster();
+        let mouse = new THREE.Vector2();
+        let hoveredNode = null;
+        let selectedWeather = "☀️";
+        let targetZ = 5, currentZ = 5;
+        const SPACING = 2;
+
+        document.getElementById('dateInput').valueAsDate = new Date();
+
+        document.querySelectorAll('.weather-btn').forEach(btn => {
+            btn.onclick = () => {
+                document.querySelector('.weather-btn.active').classList.remove('active');
+                btn.classList.add('active');
+                selectedWeather = btn.dataset.val;
+            };
+        });
+
+        document.getElementById('moodSlider').oninput = function() {
+            document.getElementById('moodVal').innerText = this.value;
+        };
+
+        function getThemeColor(theme) {
+            const colors = { Nature: '#4ade80', Culture: '#a855f7', Food: '#facc15', Event: '#f472b6' };
+            return colors[theme] || '#3b82f6';
+        }
+
+        function createTextLabel(text, color) {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 512; canvas.height = 128;
+            ctx.fillStyle = color;
+            ctx.font = 'bold 28px "Arial"';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(text, 256, 64);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        async function saveToCloud() {
+            const btn = document.getElementById('submitBtn');
+            const content = document.getElementById('contentInput').value;
+            if (!content) return;
+            try {
+                btn.disabled = true;
+                btn.innerText = "Uploading...";
+                let imageUrl = "";
+                const file = document.getElementById('imageInput').files[0];
+                if (file) {
+                    const fileName = `${Date.now()}.${file.name.split('.').pop()}`;
+                    await supabaseClient.storage.from('uploads').upload(fileName, file);
+                    imageUrl = supabaseClient.storage.from('uploads').getPublicUrl(fileName).data.publicUrl;
+                }
+                await supabaseClient.from('life_logs').insert([{
+                    log_date: document.getElementById('dateInput').value,
+                    place: document.getElementById('placeInput').value,
+                    weather: selectedWeather,
+                    mood_value: parseInt(document.getElementById('moodSlider').value),
+                    theme: document.getElementById('themeInput').value,
+                    content: content,
+                    image_url: imageUrl
+                }]);
+                location.reload();
+            } catch (err) { btn.disabled = false; btn.innerText = "Retry Archive"; }
+        }
+
+        async function loadArchives() {
+            const { data } = await supabaseClient.from('life_logs').select('*').order('log_date', { ascending: false });
+            if (data) {
+                document.getElementById('logsDisplay').innerHTML = data.map(item => `
+                    <div class="log-item" style="border-left-color: ${getThemeColor(item.theme)}">
+                        <small style="color:var(--text-dim)">${item.log_date} | ${item.weather} | ${item.place || 'Unknown'}</small>
+                        <p style="margin: 10px 0 0 0; font-size: 0.95rem;">${item.content}</p>
+                    </div>`).join('');
+            }
+            return data;
+        }
+
+        async function enter3D() {
+            const logs = await loadArchives();
+            if(!logs || logs.length === 0) return alert("No entries found in the archive.");
+            document.getElementById('app-2d').style.opacity = '0';
+            setTimeout(() => {
+                document.getElementById('app-2d').style.display = 'none';
+                document.getElementById('gallery-3d').style.display = 'block';
+                is3D = true;
+                initThreeJS(logs);
+            }, 800);
+        }
+
+        function initThreeJS(logs) {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a0c10);
+            scene.fog = new THREE.FogExp2(0x0a0c10, 0.08);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 0, 5);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('gallery-3d').appendChild(renderer.domElement);
+
+            // Background Starfield (15k particles)
+            const starsGeo = new THREE.BufferGeometry();
+            const starsPositions = [];
+            for (let i = 0; i < 15000; i++) {
+                starsPositions.push((Math.random() - 0.5) * 200, (Math.random() - 0.5) * 200, (Math.random() - 1) * 300);
+            }
+            starsGeo.setAttribute('position', new THREE.Float32BufferAttribute(starsPositions, 3));
+            const starsMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.05, transparent: true, opacity: 0.6 });
+            starField = new THREE.Points(starsGeo, starsMat);
+            scene.add(starField);
+
+            // Floating Noise (1k particles)
+            const noiseGeo = new THREE.BufferGeometry();
+            const noisePositions = [];
+            for (let i = 0; i < 1000; i++) {
+                noisePositions.push((Math.random() - 0.5) * 30, (Math.random() - 0.5) * 30, (Math.random() - 0.5) * 100);
+            }
+            noiseGeo.setAttribute('position', new THREE.Float32BufferAttribute(noisePositions, 3));
+            const noiseMat = new THREE.PointsMaterial({ color: 0x3b82f6, size: 0.12, transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending });
+            floatingParticles = new THREE.Points(noiseGeo, noiseMat);
+            scene.add(floatingParticles);
+
+            spiralGroup = new THREE.Group();
+            const textureLoader = new THREE.TextureLoader();
+            textureLoader.setCrossOrigin('anonymous');
+
+            logs.forEach((log, i) => {
+                const angle = i * 0.75;
+                const z = -i * SPACING;
+                const themeColor = getThemeColor(log.theme);
+                const moodScale = (log.mood_value || 5) / 5;
+
+                textureLoader.load(log.image_url || 'https://via.placeholder.com/400x300/111/fff?text=MOMENT', (tex) => {
+                    const aspect = tex.image.width / tex.image.height;
+                    const cardGroup = new THREE.Group();
+                    
+                    // Main Image Card
+                    const mainPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.5 * aspect * moodScale, 1.5 * moodScale), new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide }));
+                    cardGroup.add(mainPlane);
+                    
+                    // Glow Background
+                    const glowPlane = new THREE.Mesh(new THREE.PlaneGeometry(1.6 * aspect * moodScale, 1.6 * moodScale), new THREE.MeshBasicMaterial({ color: new THREE.Color(themeColor), transparent: true, opacity: 0.8, side: THREE.DoubleSide, blending: THREE.AdditiveBlending }));
+                    glowPlane.position.z = -0.05;
+                    cardGroup.add(glowPlane);
+
+                    // Label
+                    const labelTex = createTextLabel(`${log.log_date} ${log.weather}`, themeColor);
+                    const labelMesh = new THREE.Mesh(new THREE.PlaneGeometry(4, 1), new THREE.MeshBasicMaterial({ map: labelTex, transparent: true, side: THREE.DoubleSide }));
+                    labelMesh.position.y = (2.5 * moodScale) / 3 + 0.2;
+                    cardGroup.add(labelMesh);
+
+                    cardGroup.position.set(Math.cos(angle) * 3.5, Math.sin(angle) * 3.5, z);
+                    cardGroup.lookAt(0, 0, z); // Initial orientation
+                    cardGroup.userData = { info: `${log.weather} ${log.place || ''}`, content: log.content, date: log.log_date, originalRotation: cardGroup.rotation.clone() };
+                    spiralGroup.add(cardGroup);
+                });
+            });
+
+            scene.add(spiralGroup);
+            scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+
+            window.addEventListener('wheel', (e) => {
+                if(!is3D) return;
+                targetZ -= e.deltaY * 0.015;
+            }, { passive: true });
+
+            animate();
+        }
+
+        function animate() {
+            if(!is3D) return;
+            requestAnimationFrame(animate);
+            currentZ += (targetZ - currentZ) * 0.08;
+            camera.position.z = currentZ;
+
+            // Global Spiral Rotation
+            spiralGroup.rotation.z = -currentZ * 0.1;
+
+            const time = performance.now() * 0.001;
+            if(floatingParticles){
+                floatingParticles.rotation.z += 0.0001;
+                floatingParticles.position.x = Math.sin(time * 0.2) * 0.1;
+                floatingParticles.position.y = Math.cos(time * 0.2) * 0.1;
+            }
+            if(starField) starField.position.z = -currentZ * 0.05; 
+
+            // Interaction Raycasting
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(spiralGroup.children, true);
+            const tip = document.getElementById('info-tip');
+
+            if (intersects.length > 0) {
+                let obj = intersects[0].object;
+                while(obj.parent && !obj.userData.content) obj = obj.parent;
+                
+                if (hoveredNode !== obj) {
+                    if(hoveredNode) hoveredNode.rotation.copy(hoveredNode.userData.originalRotation); // Reset previous
+                    hoveredNode = obj;
+                    document.getElementById('tip-header').innerText = `${obj.userData.date} | ${obj.userData.info}`;
+                    document.getElementById('tip-body').innerText = obj.userData.content;
+                    tip.style.opacity = '1';
+                    tip.style.transform = 'translateX(-50%) translateY(-10px) scale(1)';
+                }
+
+                // --- FIX: Counter-rotate to face camera ---
+                if (hoveredNode) {
+                    hoveredNode.rotation.z = -spiralGroup.rotation.z;
+                    hoveredNode.rotation.y = 0;
+                    hoveredNode.rotation.x = 0;
+                }
+            } else {
+                if (hoveredNode) {
+                    // Restore original spiral orientation
+                    hoveredNode.rotation.copy(hoveredNode.userData.originalRotation);
+                }
+                hoveredNode = null;
+                tip.style.opacity = '0';
+                tip.style.transform = 'translateX(-50%) translateY(0) scale(0.95)';
+            }
+            renderer.render(scene, camera);
+        }
+
+        function init2DBackground() {
+            const canvas2d = document.getElementById('bg-canvas-2d');
+            const renderer2d = new THREE.WebGLRenderer({ canvas: canvas2d, antialias: true, alpha: true });
+            renderer2d.setSize(window.innerWidth, window.innerHeight);
+            const scene2d = new THREE.Scene();
+            const camera2d = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera2d.position.z = 5;
+
+            const starsGeo2d = new THREE.BufferGeometry();
+            const starsPositions2d = [];
+            for (let i = 0; i < 8000; i++) {
+                starsPositions2d.push((Math.random() - 0.5) * 150, (Math.random() - 0.5) * 150, (Math.random() - 1) * 200);
+            }
+            starsGeo2d.setAttribute('position', new THREE.Float32BufferAttribute(starsPositions2d, 3));
+            const starsMat2d = new THREE.PointsMaterial({ color: 0xffffff, size: 0.04, transparent: true, opacity: 0.2 });
+            const starField2d = new THREE.Points(starsGeo2d, starsMat2d);
+            scene2d.add(starField2d);
+
+            function animate2D() {
+                if(is3D) return;
+                requestAnimationFrame(animate2D);
+                starField2d.rotation.z += 0.001;
+                renderer2d.render(scene2d, camera2d);
+            }
+            animate2D();
+        }
+
+        window.addEventListener('mousemove', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        });
+
+        function exit3D() { location.reload(); }
+        loadArchives();
+        init2DBackground(); 
+
+    </script>
+</body>
+</html>
